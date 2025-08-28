@@ -173,7 +173,7 @@ def process_folder(prompt: str, box_thr: float, text_thr: float, input_dir: Path
                 raise RuntimeError("Failed to read image")
 
         rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        print(f"   -> {src.name} | shape={rgb.shape}")  # <— NEW
+        print(f"   -> {src.name} | shape={rgb.shape}")  
 
         boxes, scores, phrases = predict_no_cuda(
             model,
@@ -183,7 +183,7 @@ def process_folder(prompt: str, box_thr: float, text_thr: float, input_dir: Path
             device=device
         )
 
-        print(f"   <- detections: {len(phrases)}")      # <— NEW
+        print(f"   <- detections: {len(phrases)}")      
         annotated = draw_boxes(img_bgr, boxes, scores, phrases)
         out_path = out_dir / f"{src.stem}_dino.jpg"
         cv2.imwrite(str(out_path), annotated, [cv2.IMWRITE_JPEG_QUALITY, 95])
