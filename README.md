@@ -1,7 +1,23 @@
-# Groundingdino-test script (even for ARM Mac) as Fashion detector
+# Groundingdino-test: Text-Driven Object Detection for Fashion Items from PSD
 
-Purpose of this repository is to somehow archive steps to run Grounding DINO object detection with text encoder.
-Our use-case
+This repository provides a step-by-step guide for running Grounding DINO object detection with text prompts, specifically optimized for fashion item detection. It works on both x86 and ARM-based Mac systems.
+
+## Overview
+
+Grounding DINO combines the power of vision transformers with text encoders to detect objects based on natural language descriptions. This implementation focuses on identifying clothing items like underwear, bras, and leggings in images.
+
+## Features
+
+- Text-prompted object detection
+- Support for ARM architecture (M1/M2 Macs)
+- Easy-to-follow setup process
+- Batch processing of multiple images
+
+## Use Cases
+
+- Batch PSD processing with fashion item detection
+- Automated tagging of clothing items
+- Dataset preparation for fashion-related machine learning tasks
 
 ## Setup (even for arch. ARM MAC)
 
@@ -13,6 +29,7 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install "torch>=2.2,<2.4" torchvision torchaudio
 pip install groundingdino-py psd-tools pillow opencv-pytho
+pip install -r requirements.txt
 curl -L -o weights/groundingdino_swint_ogc.pth \
   https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth
 
