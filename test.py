@@ -34,18 +34,66 @@ def find_config_path() -> str:
 
 
 # ---------------- PSD flatten (uses composite()) ----------------
+# def flatten_psd_to_bgr(psd_path: Path) -> np.ndarray:
+#     psd = PSDImage.open(psd_path)
+#     pil_img = psd.composite()  # RGBA or RGB
+#     if pil_img.mode == "RGBA":
+#         bg = Image.new("RGB", pil_img.size, (255, 255, 255))
+#         bg.paste(pil_img, mask=pil_img.split()[-1])
+#         pil_img = bg
+#     else:
+#         pil_img = pil_img.convert("RGB")
+#     return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+
+# ---------------- PSD flatten (hide top "Rectangle" overlay if semi-transparent) ----------------
+# ---------------- PSD flatten (hide top "Rectangle" overlay if semi-transparent) ----------------
+# ---------------- PSD flatten (hide semi-transparent "Rectangle" overlay) ----------------
 def flatten_psd_to_bgr(psd_path: Path) -> np.ndarray:
     psd = PSDImage.open(psd_path)
-    pil_img = psd.composite()  # RGBA or RGB
+
+    # psd-tools opacity is 0..255
+    def is_overlay(layer) -> bool:
+        name = (getattr(layer, "name", "") or "").lower()
+        if "rectangle" not in name:
+            return False
+        if not bool(getattr(layer, "visible", True)):
+            return False
+        opacity = int(getattr(layer, "opacity", 255))
+        # if opacity is in the 255
+        print(f"Layer '{name}' opacity: {opacity}", "returning True" if opacity < (int(0.4 * 255)) else "returning False")
+        return opacity < int(0.4 * 255)
+
+    # Hide matches in the first few top layers (+ their children if they’re groups)
+    try:
+        layers = list(psd)   # topmost first in modern psd-tools
+    except TypeError:
+        layers = []
+    
+    # keep only visible layers
+    layers = [lyr for lyr in layers if bool(getattr(lyr, "visible", True))]
+    layers = layers[-5:]  # only check the top few layers
+    changes = False
+    print(f"Visible layers: {[getattr(lyr, 'name', '') for lyr in layers]}")
+    for lyr in layers:
+        # If this top layer itself matches, hide it
+        if is_overlay(lyr):
+            changes=True
+            # lyr.delete_layer()
+            lyr.opacity = 0
+            print(f"Deleted layer: {getattr(lyr, 'name', '')}")
+
+    # Composite to PIL and convert to BGR np.ndarray
+    pil_img = psd.composite(ignore_preview=changes,
+        # layer_filter= lambda layer: layer.
+    )  # RGBA or RGB
     if pil_img.mode == "RGBA":
         bg = Image.new("RGB", pil_img.size, (255, 255, 255))
         bg.paste(pil_img, mask=pil_img.split()[-1])
         pil_img = bg
     else:
         pil_img = pil_img.convert("RGB")
+
     return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-
-
 # ---------------- geometry helpers ----------------
 def clamp(val, lo, hi):
     return max(lo, min(hi, val))
@@ -116,17 +164,82 @@ def expand_norm_box(det_norm, w, h, pad_x_frac, pad_y_frac):
     return expand_box_with_padding(x1, y1, x2, y2, pad_x_frac, pad_y_frac, w, h)
 
 
+# ---------------- aspect padding (no stretch) ----------------
+def sample_edge_color(img_bgr: np.ndarray, side: str, frac: float = 0.03) -> tuple:
+    """
+    Sample a thin strip at the given edge and return the median BGR color (as ints).
+    side: 'left'|'right'|'top'|'bottom'
+    frac: strip thickness as a fraction of image dimension (clamped 1..50 px)
+    """
+    h, w = img_bgr.shape[:2]
+    t = max(1, min(50, int(round((w if side in ('left','right') else h) * frac))))
+    if side == 'left':
+        strip = img_bgr[:, :t]
+    elif side == 'right':
+        strip = img_bgr[:, w - t:]
+    elif side == 'top':
+        strip = img_bgr[:t, :]
+    else:  # 'bottom'
+        strip = img_bgr[h - t:, :]
+    med = np.median(strip.reshape(-1, 3), axis=0)
+    return tuple(int(round(c)) for c in med)
+
+def pad_to_aspect_with_edge_color(img_bgr: np.ndarray, aspect: float) -> np.ndarray:
+    """
+    Add solid-color bands (sampled from edges) to reach the target aspect ratio,
+    without distorting the original image. Each side uses its own color.
+    """
+    h, w = img_bgr.shape[:2]
+    if h <= 0 or w <= 0:
+        return img_bgr
+
+    current_aspect = w / h
+    if abs(current_aspect - aspect) < 1e-6:
+        return img_bgr  # already correct
+
+    if current_aspect < aspect:
+        # Too narrow -> pad left/right
+        need_w = int(np.ceil(aspect * h))
+        pad_total = max(0, need_w - w)
+        pad_left = pad_total // 2
+        pad_right = pad_total - pad_left
+
+        left_color = sample_edge_color(img_bgr, 'left')
+        right_color = sample_edge_color(img_bgr, 'right')
+
+        left_pad = np.full((h, pad_left, 3), left_color, dtype=img_bgr.dtype) if pad_left > 0 else None
+        right_pad = np.full((h, pad_right, 3), right_color, dtype=img_bgr.dtype) if pad_right > 0 else None
+
+        parts = [p for p in (left_pad, img_bgr, right_pad) if p is not None]
+        img_bgr = np.concatenate(parts, axis=1)
+
+    else:
+        # Too wide -> pad top/bottom
+        need_h = int(np.ceil(w / aspect))
+        pad_total = max(0, need_h - h)
+        pad_top = pad_total // 2
+        pad_bottom = pad_total - pad_top
+
+        top_color = sample_edge_color(img_bgr, 'top')
+        bottom_color = sample_edge_color(img_bgr, 'bottom')
+
+        top_pad = np.full((pad_top, img_bgr.shape[1], 3), top_color, dtype=img_bgr.dtype) if pad_top > 0 else None
+        bottom_pad = np.full((pad_bottom, img_bgr.shape[1], 3), bottom_color, dtype=img_bgr.dtype) if pad_bottom > 0 else None
+
+        parts = [p for p in (top_pad, img_bgr, bottom_pad) if p is not None]
+        img_bgr = np.concatenate(parts, axis=0)
+
+    return img_bgr
+
+
 # ---------------- cropping planners ----------------
 def plan_primary_crop_4x5(
     img_w, img_h,
     det_box_norm,
     pad_x_frac=0.12, pad_y_frac=0.10,
     aspect=0.8,
-    anchor_y=0.50  # 0=top .. 1=bottom position of product center inside the final crop
+    anchor_y=0.50
 ):
-    """
-    Minimal 4:5 covering the padded product. Place vertically by anchor_y (subject to bounds).
-    """
     x1n, y1n, x2n, y2n = det_box_norm
     x1 = int(round(x1n * img_w))
     y1 = int(round(y1n * img_h))
@@ -168,23 +281,20 @@ def plan_primary_crop_4x5(
 
 def plan_primary_crop_with_head_4x5(
     img_w, img_h,
-    det_box_norm,        # product box (normalized)
-    head_box_norm=None,  # head/face box (normalized) or None
+    det_box_norm,
+    head_box_norm=None,
     pad_x_frac=0.12, pad_y_frac=0.10,
     head_pad_x=0.10, head_pad_y=0.12,
-    aspect=0.8, anchor_y=0.90,  # default: push product lower
+    aspect=0.8, anchor_y=0.90,
 ):
-    # expand product
     x1e, y1e, x2e, y2e = expand_norm_box(det_box_norm, img_w, img_h, pad_x_frac, pad_y_frac)
     ux1, uy1, ux2, uy2 = x1e, y1e, x2e, y2e
 
-    # include head if present
     if head_box_norm is not None:
         hx1e, hy1e, hx2e, hy2e = expand_norm_box(head_box_norm, img_w, img_h, head_pad_x, head_pad_y)
         ux1, uy1, ux2, uy2 = union_xyxy((ux1, uy1, ux2, uy2), (hx1e, hy1e, hx2e, hy2e))
         ux1, uy1, ux2, uy2 = clamp_box_xyxy(ux1, uy1, ux2, uy2, img_w, img_h)
 
-    # now compute a crop that covers the union, with placement logic
     bw, bh = max(1, ux2 - ux1), max(1, uy2 - uy1)
     cx, cy = ux1 + bw / 2.0, uy1 + bh / 2.0
 
@@ -218,12 +328,11 @@ def plan_other_visible_4x5(
     det_box_norm,
     pad_x_frac=0.12, pad_y_frac=0.10,
     aspect=0.8,
-    scale=1.25,          # enlarge crop to show more body
-    anchor_y=0.60,       # place product slightly lower than center by default
-    head_box_norm=None,  # if show-head, include head in the union
+    scale=1.25,
+    anchor_y=0.60,
+    head_box_norm=None,
     head_pad_x=0.10, head_pad_y=0.12
 ):
-    # base union = padded product (and head if provided)
     x1e, y1e, x2e, y2e = expand_norm_box(det_box_norm, img_w, img_h, pad_x_frac, pad_y_frac)
     ux1, uy1, ux2, uy2 = x1e, y1e, x2e, y2e
     if head_box_norm is not None:
@@ -234,7 +343,6 @@ def plan_other_visible_4x5(
     bw, bh = max(1, ux2 - ux1), max(1, uy2 - uy1)
     cx, cy = ux1 + bw / 2.0, uy1 + bh / 2.0
 
-    # start from minimal cover 4:5
     if bw / bh > aspect:
         crop_w = bw
         crop_h = int(round(crop_w / aspect))
@@ -242,18 +350,15 @@ def plan_other_visible_4x5(
         crop_h = bh
         crop_w = int(round(crop_h * aspect))
 
-    # scale up to show more body, within image limits
     crop_h = int(round(min(img_h, crop_h * scale)))
     crop_w = int(round(min(img_w, aspect * crop_h)))
 
-    # center X on union
     x1c = int(round(cx - crop_w / 2.0)); x2c = x1c + crop_w
     if x1c < 0: x2c -= x1c; x1c = 0
     if x2c > img_w:
         shift = x2c - img_w
         x1c -= shift; x2c = img_w
 
-    # anchor in Y while keeping union inside
     target_top = int(round(cy - anchor_y * crop_h))
     lo = max(0, uy2 - crop_h)
     hi = min(img_h - crop_h, uy1)
@@ -285,7 +390,7 @@ def predict_no_cuda(model, image_rgb: np.ndarray, prompt: str, box_threshold: fl
     x = x.permute(2, 0, 1).contiguous()                        # CHW
     mean = torch.tensor([0.485, 0.456, 0.406]).view(3,1,1)
     std  = torch.tensor([0.229, 0.224, 0.225]).view(3,1,1)
-    x = (x - mean) / std                                       # still CHW
+    x = (x - mean) / std
 
     samples = nested_tensor_from_tensor_list([x]).to(device)
 
@@ -333,7 +438,8 @@ def process_folder(prompt: str, box_thr: float, text_thr: float, input_dir: Path
                    aspect: float, mode: str, pad_x: float, pad_y: float,
                    out_w: int, out_h: int, anchor_y: float,
                    show_head: bool, head_pad_x: float, head_pad_y: float,
-                   other_scale: float, other_anchor_y: float):
+                   other_scale: float, other_anchor_y: float,
+                   extend_background: str):
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "preview").mkdir(parents=True, exist_ok=True)
     (out_dir / "crop").mkdir(parents=True, exist_ok=True)
@@ -379,10 +485,11 @@ def process_folder(prompt: str, box_thr: float, text_thr: float, input_dir: Path
                 crop_xyxy = largest_fit_aspect(img_bgr.shape[1], img_bgr.shape[0], aspect)
                 preview = draw_final_crop_rectangle(img_bgr, crop_xyxy, (0,0,255), 3)
             else:
+                scores = np.array(scores)
+                scores = scores[scores > 0.1]
                 best = int(np.argmax(scores))
-                det_norm = boxes[best]  # normalized xyxy
+                det_norm = boxes[best]
 
-                # optional head detection
                 head_norm = None
                 if show_head:
                     boxes_h, scores_h, _ = predict_no_cuda(
@@ -395,7 +502,6 @@ def process_folder(prompt: str, box_thr: float, text_thr: float, input_dir: Path
                     if boxes_h.size:
                         head_norm = boxes_h[int(np.argmax(scores_h))]
 
-                # pick crop planner
                 if mode == "primary":
                     if show_head:
                         crop_xyxy = plan_primary_crop_with_head_4x5(
@@ -413,7 +519,7 @@ def process_folder(prompt: str, box_thr: float, text_thr: float, input_dir: Path
                             pad_x_frac=pad_x, pad_y_frac=pad_y,
                             aspect=aspect, anchor_y=anchor_y
                         )
-                else:  # other
+                else:
                     crop_xyxy = plan_other_visible_4x5(
                         img_bgr.shape[1], img_bgr.shape[0],
                         det_box_norm=det_norm,
@@ -423,21 +529,30 @@ def process_folder(prompt: str, box_thr: float, text_thr: float, input_dir: Path
                         head_pad_x=head_pad_x, head_pad_y=head_pad_y
                     )
 
-                # preview: detections + final crop
-                preview = draw_boxes(img_bgr, boxes, scores, [prompt]*len(scores))  # green boxes
+                preview = draw_boxes(img_bgr, boxes, scores, [prompt]*len(scores))
                 preview = draw_final_crop_rectangle(preview, crop_xyxy, color=(0,0,255), thickness=3)
 
             # save preview
             preview_path = out_dir / f"preview/{src.stem}_preview.jpg"
             cv2.imwrite(str(preview_path), preview, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
-            # final crop
+            # final crop -> extend background (if needed) -> resize
             x1, y1, x2, y2 = map(int, crop_xyxy)
             cropped = img_bgr[y1:y2, x1:x2].copy()
+
+            if extend_background == "edge":
+                cropped = pad_to_aspect_with_edge_color(cropped, aspect)
+
+            # After padding, we are exactly (or very nearly) at the target aspect
             resized = cv2.resize(cropped, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
 
             final_path = out_dir / f"crop/{src.stem}_crop_{out_w}x{out_h}.jpg"
-            cv2.imwrite(str(final_path), resized, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            FINAL_JPEG_PARAMS = [
+                cv2.IMWRITE_JPEG_QUALITY, 82,                    # sweet spot for web
+                cv2.IMWRITE_JPEG_PROGRESSIVE, 1,
+                cv2.IMWRITE_JPEG_OPTIMIZE, 1
+            ]
+            cv2.imwrite(str(final_path), resized, FINAL_JPEG_PARAMS)
 
             print(f"[ok] {src.name} -> {preview_path.name} (preview), {final_path.name} (crop)")
         except Exception as e:
@@ -450,7 +565,7 @@ def main():
     ap.add_argument("--prompt", required=True, help='e.g. "bra", "panties", "t-shirt"')
     ap.add_argument("--weights", required=True, help="Path to groundingdino_swint_ogc.pth")
     ap.add_argument("--box-threshold", type=float, default=0.30)
-    ap.add_argument("--text-threshold", type=float, default=0.25)  # kept for API symmetry
+    ap.add_argument("--text-threshold", type=float, default=0.25)
     ap.add_argument("--input", default="input", help="Input directory")
     ap.add_argument("--out", default="out", help="Output directory")
     ap.add_argument("--include-images", action="store_true", help="Also process JPG/PNG")
@@ -465,17 +580,21 @@ def main():
     ap.add_argument("--anchor-y", type=float, default=None,
                     help="Override --place with explicit 0..1 anchor (0=top, 0.5=center, 1=bottom).")
 
-    # NEW: head control
+    # head control
     ap.add_argument("--show-head", action="store_true",
                     help="Also detect head/face and force the crop to include it (union with product).")
     ap.add_argument("--head-pad-x", type=float, default=0.10, help="Padding for head box (x fraction)")
     ap.add_argument("--head-pad-y", type=float, default=0.12, help="Padding for head box (y fraction)")
 
-    # NEW: secondary images (mode=other) controls
+    # secondary controls
     ap.add_argument("--other-scale", type=float, default=1.25,
                     help="Scale factor over minimal 4:5 to show more body (mode=other).")
     ap.add_argument("--other-anchor-y", type=float, default=0.60,
                     help="Vertical anchor for mode=other (0=top..1=bottom).")
+
+    # NEW: extend background with edge colors so we never stretch
+    ap.add_argument("--extend-background", choices=["none","edge"], default="edge",
+                    help="If image is too narrow/tall for the target aspect, add solid bands sampled from edges.")
 
     args = ap.parse_args()
 
@@ -507,6 +626,7 @@ def main():
         head_pad_y=args.head_pad_y,
         other_scale=args.other_scale,
         other_anchor_y=args.other_anchor_y,
+        extend_background=args.extend_background,
     )
 
 

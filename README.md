@@ -46,10 +46,10 @@ curl -L -o weights/groundingdino_swint_ogc.pth \
 Primary image for bra while still showing head:
 `python test.py --prompt "upper underware bra." --input ./input/bra --weights weights/groundingdino_swint_ogc.pth --include-images --device cpu --out out_bra --mode primary --show-head --pad-x 0.18 --pad-y 0.16 --head-pad-x 0.14 --head-pad-y 0.25 --place lower --anchor-y 0.93 --box-threshold 0.35`
 
-Primary image for panties:
+Primary image for panties/bottom underware:
 `python test.py --prompt "bottom underware panties." --input ./input/bra --weights weights/groundingdino_swint_ogc.pth --include-images --device cpu --out out_panties --place center --mode primary --pad-x 0.2 --pad-y 0.22 --anchor-y 0.55 --box-threshold 0.35`
 
-Primary image for leggins:
+Primary image for leggins/pants/shorts:
 `python test.py --prompt "bottom leggins pants." --input ./input/leggins --weights weights/groundingdino_swint_ogc.pth --include-images --device cpu --out out_leggins --mode primary --place upper --pad-x 0.1 --pad-y 0.2 --box-threshold 0.35`
 
 Primary image for t-shirt/camisole:
@@ -57,6 +57,9 @@ Primary image for t-shirt/camisole:
 
 Primary image for pyjama trousers:
 `python test.py --prompt "bottom pyjama pants." --input ./input/pyjama-trousers --weights weights/groundingdino_swint_ogc.pth --include-images --device cpu --out out_pyjama-trousers --mode primary --place upper --pad-x 0.1 --pad-y 0.2 --box-threshold 0.35`
+
+Primary image for pyjama whole body:
+`python test.py --prompt "whole human body." --input ./input/pyjama-wholebody --weights weights/groundingdino_swint_ogc.pth --include-images --device cpu --out out_pyjama-wholebody3 --mode primary --place center --pad-x 0.0 --pad-y 0.01 --box-threshold 0.0`
 
 ## Results
 
