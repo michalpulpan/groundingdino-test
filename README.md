@@ -43,6 +43,21 @@ curl -L -o weights/groundingdino_swint_ogc.pth \
 
 `python test.py --prompt "bottom leggins pants." --input ./input/leggins --weights weights/groundingdino_swint_ogc.pth --include-images --device cpu --out out_leggins`
 
+Primary image for bra while still showing head:
+`python test.py --prompt "upper underware bra." --input ./input/bra --weights weights/groundingdino_swint_ogc.pth --include-images --device cpu --out out_bra --mode primary --show-head --pad-x 0.18 --pad-y 0.16 --head-pad-x 0.14 --head-pad-y 0.25 --place lower --anchor-y 0.93 --box-threshold 0.35`
+
+Primary image for panties:
+`python test.py --prompt "bottom underware panties." --input ./input/bra --weights weights/groundingdino_swint_ogc.pth --include-images --device cpu --out out_panties --place center --mode primary --pad-x 0.2 --pad-y 0.22 --anchor-y 0.55 --box-threshold 0.35`
+
+Primary image for leggins:
+`python test.py --prompt "bottom leggins pants." --input ./input/leggins --weights weights/groundingdino_swint_ogc.pth --include-images --device cpu --out out_leggins --mode primary --place upper --pad-x 0.1 --pad-y 0.2 --box-threshold 0.35`
+
+Primary image for t-shirt/camisole:
+`python test.py --prompt "tshirt." --input ./input/tshirt --weights weights/groundingdino_swint_ogc.pth --include-images --device cpu --out out_tshirt --mode primary --place lower --show-head --box-threshold 0.25`
+
+Primary image for pyjama trousers:
+`python test.py --prompt "bottom pyjama pants." --input ./input/pyjama-trousers --weights weights/groundingdino_swint_ogc.pth --include-images --device cpu --out out_pyjama-trousers --mode primary --place upper --pad-x 0.1 --pad-y 0.2 --box-threshold 0.35`
+
 ## Results
 
 ![`bottom leggins pants.` prompt](out_leggins/95031_DCM_M1+_dino.jpg){height=640}
